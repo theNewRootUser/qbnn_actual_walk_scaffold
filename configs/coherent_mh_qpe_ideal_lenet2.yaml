@@ -1,0 +1,45 @@
+name: coherent_mh_qpe_ideal_lenet2
+
+data:
+  dataset_name: zipcode
+  npz_path: data/zipcode/zipcode.npz
+
+model:
+  architecture: lenet2
+  prior_std: 1.0
+  image_height: 16
+  image_width: 16
+  num_channels: 1
+  num_classes: 10
+  conv1_out: 12
+  conv2_out: 6
+  fc_hidden: 30
+
+sampling:
+  sweeps_total: 6
+  final_sweeps: 1
+  exploratory_shots: 256
+  final_shots: 1024
+  theta_samples_per_block: 1
+  random_seed: 1234
+  save_all_sweeps: true
+  score_only_final_sweeps: true
+
+partition:
+  enabled: true
+  strategy: contiguous_weight_blocks
+  block_param_count: 1
+
+quantum:
+  execution_mode: ideal
+  family: coherent_mh
+  pe_mode: qpe
+  num_eval_qubits: 4
+  optimization_level: 1
+  extra:
+    reference_theta_path: outputs/classical_lenet2_zipcode.json
+    discretization_bits: 1
+    quant_step: 0.05
+    proposal_kind: hamming
+    diagnostic_block_count: 3
+    max_dense_diag_states: 32
