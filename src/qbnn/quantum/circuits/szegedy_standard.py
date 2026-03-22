@@ -5,7 +5,7 @@ from scipy.linalg import block_diag
 from qiskit import QuantumCircuit, QuantumRegister, ClassicalRegister
 from qiskit.circuit.library import UnitaryGate
 from src.qbnn.quantum.utils import amplitude_vector_from_probabilities, unitary_from_statevector, bitstring_of_int
-from src.qbnn.quantum.circuits.qpe_textbook import build_qpe_diagnostic
+from src.qbnn.quantum.circuits.qpe_textbook import build_qpe_diagnostic, build_qpe_circuit
 
 @dataclass
 class SzegedyProblem:
@@ -66,14 +66,21 @@ def build_szegedy_qpe_problem(p: np.ndarray, num_eval_qubits: int = 4, max_dense
     n_states = p.shape[0]
     if p.shape[0] != p.shape[1]:
         raise ValueError("transition matrix must be square")
+
     if n_states > max_dense_states:
         logical = {
             "family": "szegedy",
             "num_states": int(n_states),
             "feasible": False,
-            "reason": f"dense Szegedy walk disabled above {max_dense_states} states"
+            "reason": f"dense Szegedy walk disabled above {max_dense_states} states",
         }
-        return SzegedyProblem(transition_matrix=p, walk_unitary=None, sample_circuit=None, diagnostic_qpe_circuit=None, logical_info=logical)
+        return SzegedyProblem(
+            transition_matrix=p,
+            walk_unitary=None,
+            sample_circuit=None,
+            diagnostic_qpe_circuit=None,
+            logical_info=logical,
+        )
 
     n = int(np.ceil(np.log2(n_states)))
     W = build_szegedy_walk_unitary(p)
@@ -85,19 +92,6 @@ def build_szegedy_qpe_problem(p: np.ndarray, num_eval_qubits: int = 4, max_dense
         reason_if_skipped="Dense Szegedy circuit-QPE skipped locally; using classical spectral diagnostics instead.",
     )
 
-
-    sys_qubits = 2 * n
-    # Initial state: uniform over x, zero on y, then A to create average row state.
-    prep_reg = QuantumRegister(sys_qubits, "sys")
-    prep = QuantumCircuit(prep_reg, name="A_uniform")
-    xq = list(prep_reg[:n])
-    yq = list(prep_reg[n:])
-    prep.h(xq)
-    A = _build_A_matrix(p)
-    prep.append(UnitaryGate(A, label="A"), prep_reg)
-    qpe_meas = qpe_bundle.circuit  # will be None for dense W
-
-    # Sampling circuit: same QPE circuit, postselect zero phase offline, then read the left register.
     logical = {
         "family": "szegedy",
         "state_qubits": int(n),
@@ -105,6 +99,12 @@ def build_szegedy_qpe_problem(p: np.ndarray, num_eval_qubits: int = 4, max_dense
         "qpe_skipped": qpe_bundle.skipped,
         "qpe_skip_reason": qpe_bundle.reason,
         "classical_qpe_diagnostics": qpe_bundle.classical,
-        # keep your existing fields too
     }
-    return SzegedyProblem(transition_matrix=p, walk_unitary=W, sample_circuit=qpe_meas, diagnostic_qpe_circuit=qpe_meas, logical_info=logical)
+
+    return SzegedyProblem(
+        transition_matrix=p,
+        walk_unitary=W,
+        sample_circuit=None,
+        diagnostic_qpe_circuit=None,
+        logical_info=logical,
+    )

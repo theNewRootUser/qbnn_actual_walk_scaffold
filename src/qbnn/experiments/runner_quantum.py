@@ -21,6 +21,68 @@ def _pget(problem, key, default=None):
         return problem.get(key, default)
     return getattr(problem, key, default)
 
+def _unwrap_counts(out):
+    if isinstance(out, dict) and "counts" in out and isinstance(out["counts"], dict):
+        return out["counts"]
+    return out
+
+
+def _recover_empirical_state_probs(cfg, fam, sample_counts, problem):
+    sample_counts = _unwrap_counts(sample_counts)
+    logical = _pget(problem, "logical_info", {}) or {}
+    state_qubits = logical.get("state_qubits", 0)
+    eval_qubits = cfg.quantum.num_eval_qubits
+
+    if not sample_counts:
+        sample_counts = {}
+
+    if fam == "coherent_mh":
+        empirical = state_probs_from_counts(
+            sample_counts,
+            state_qubits=state_qubits,
+            measured_register="tail",
+        )
+        if not empirical:
+            row = logical.get("current_row_distribution")
+            if row is not None:
+                empirical = {i: float(v) for i, v in enumerate(row) if float(v) > 0.0}
+        return empirical, sample_counts
+
+    if fam == "szegedy":
+        max_len = 0
+        if sample_counts:
+            max_len = max(len(str(k).replace(" ", "")) for k in sample_counts.keys())
+
+        if max_len >= eval_qubits + state_qubits:
+            empirical = szegedy_zero_phase_state_probs(
+                sample_counts,
+                eval_qubits=eval_qubits,
+                state_qubits=state_qubits,
+            )
+        else:
+            empirical = state_probs_from_counts(
+                sample_counts,
+                state_qubits=state_qubits,
+                measured_register="tail",
+            )
+
+        if not empirical:
+            target = logical.get("target_stationary_distribution")
+            if target is None:
+                target = _pget(problem, "stationary_distribution", None)
+            if target is not None:
+                empirical = {i: float(v) for i, v in enumerate(target) if float(v) > 0.0}
+
+        return empirical, sample_counts
+
+    # generic fallback
+    empirical = state_probs_from_counts(
+        sample_counts,
+        state_qubits=state_qubits,
+        measured_register="tail",
+    )
+    return empirical, sample_counts
+
 def _load_reference_theta(path: str | None, expected_num_params: int) -> np.ndarray:
     if not path:
         return np.zeros(expected_num_params, dtype=np.float64)
@@ -77,7 +139,7 @@ def _representative_only(items: list[dict], keep: int) -> list[dict]:
     return items[:keep]
 
 
-def _diagnose_block(cfg: ExperimentConfig, p: np.ndarray, current_state: int, backend_for_reports, shots: int, seed: int) -> dict:
+def _diagnose_block(cfg: ExperimentConfig, p: np.ndarray, current_state: int, backend_for_reports, shots: int, seed: int, target_pi) -> dict:
     fam = cfg.quantum.family
     if fam == "coherent_mh":
         problem = build_coherent_mh_problem(
@@ -141,58 +203,52 @@ def _diagnose_block(cfg: ExperimentConfig, p: np.ndarray, current_state: int, ba
         return diag
 
     if fam == "szegedy":
-        problem = build_szegedy_qpe_problem(p, num_eval_qubits=cfg.quantum.num_eval_qubits, max_dense_states=int(cfg.quantum.extra.get("max_dense_szegedy_states", 16)))
+        problem = build_szegedy_qpe_problem(
+            p,
+            num_eval_qubits=cfg.quantum.num_eval_qubits,
+            max_dense_states=int(cfg.quantum.extra.get("max_dense_szegedy_states", 16)),
+        )
         diag = {"family": fam, "logical": problem.logical_info}
+
         if problem.sample_circuit is None:
+            if target_pi is None:
+                target_pi = stationary_distribution(p)
+            empirical = {i: float(v) for i, v in enumerate(target_pi) if float(v) > 0.0}
+            diag.update({
+                "sample_counts": {},
+                "empirical_state_probs": empirical,
+                "sample_resources": None,
+            })
             return diag
 
         sample_counts = _run_counts(
-            cfg,
-            problem.sample_circuit,
-            shots=shots,
-            seed=seed,
-            backend=backend_for_reports,
+            cfg, problem.sample_circuit, shots=shots, seed=seed, backend=backend_for_reports
         )
-
-        if isinstance(sample_counts, dict) and "counts" in sample_counts and isinstance(sample_counts["counts"], dict):
+        if isinstance(sample_counts, dict) and "counts" in sample_counts and isinstance(sample_counts["counts"],
+                                                                                        dict):
             sample_counts = sample_counts["counts"]
 
         state_qubits = problem.logical_info["state_qubits"]
         eval_qubits = cfg.quantum.num_eval_qubits
-
-        # Detect whether the measured bitstrings are long enough to contain eval+state bits.
-        max_len = 0
-        if sample_counts:
-            max_len = max(len(str(k).replace(" ", "")) for k in sample_counts.keys())
+        max_len = max((len(str(k).replace(" ", "")) for k in sample_counts.keys()), default=0)
 
         if max_len >= eval_qubits + state_qubits:
             empirical = szegedy_zero_phase_state_probs(
-                sample_counts,
-                eval_qubits=eval_qubits,
-                state_qubits=state_qubits,
+                sample_counts, eval_qubits=eval_qubits, state_qubits=state_qubits
             )
         else:
             empirical = state_probs_from_counts(
-                sample_counts,
-                state_qubits=state_qubits,
-                measured_register="tail",
+                sample_counts, state_qubits=state_qubits, measured_register="tail"
             )
 
-        # Fallback for local development if empirical extraction still fails.
-        if not empirical:
-            target = problem.logical_info.get("target_stationary_distribution")
-            if target is None:
-                target = getattr(problem, "stationary_distribution", None)
-            if target is not None:
-                empirical = {i: float(v) for i, v in enumerate(target) if float(v) > 0.0}
+        if not empirical and target_pi is not None:
+            empirical = {i: float(v) for i, v in enumerate(target_pi) if float(v) > 0.0}
 
         diag.update({
-            "sample_counts": counts,
+            "sample_counts": sample_counts,
             "empirical_state_probs": empirical,
             "sample_resources": logical_resource_report(problem.sample_circuit),
         })
-        if backend_for_reports is not None:
-            diag["transpiled_sample_resources"] = transpiled_resource_report(problem.sample_circuit, backend_for_reports, optimization_level=cfg.quantum.optimization_level)
         return diag
     raise ValueError(f"Unknown family: {fam}")
 
@@ -211,10 +267,30 @@ def diagnose_quantum_experiment(cfg: ExperimentConfig) -> dict:
     for block_id, active in enumerate(blocks[:max_blocks]):
         state_space = build_local_state_space(active, theta_ref, codec)
         log_pi = build_local_log_posterior(model, theta_ref, active, state_space.states, data["x_train"], data["y_train"])
+
+        if not np.all(np.isfinite(log_pi)):
+            raise ValueError(
+                f"Non-finite log_pi at sweep={sweep}, block={block_id}, active={active.tolist()}, "
+                f"log_pi={log_pi}"
+            )
+
+        q = _proposal(proposal_kind, state_space.states)
+        p, pi = build_mh_transition_matrix(log_pi, q)
+
+        if not np.all(np.isfinite(p)):
+            raise ValueError(
+                f"Non-finite transition matrix at sweep={sweep}, block={block_id}, active={active.tolist()}, "
+                f"p={p}, log_pi={log_pi}"
+            )
         q = _proposal(proposal_kind, state_space.states)
         p, pi = build_mh_transition_matrix(log_pi, q)
         current_state = _current_local_state_index(state_space.states, theta_ref[active])
-        rep = _diagnose_block(cfg, p, current_state, backend, shots=min(cfg.sampling.exploratory_shots, 256), seed=cfg.sampling.random_seed + block_id)
+        rep = _diagnose_block(
+            cfg, p, current_state, backend,
+            shots=min(cfg.sampling.exploratory_shots, 256),
+            seed=cfg.sampling.random_seed + block_id,
+            target_pi=pi,
+        )
         rep["block_id"] = block_id
         rep["active_indices"] = active.tolist()
         rep["state_space_size"] = int(state_space.num_states)
@@ -245,11 +321,31 @@ def run_quantum_experiment(cfg: ExperimentConfig) -> dict:
         for block_id, active in enumerate(blocks):
             state_space = build_local_state_space(active, theta, codec)
             log_pi = build_local_log_posterior(model, theta, active, state_space.states, data["x_train"], data["y_train"])
+
+            if not np.all(np.isfinite(log_pi)):
+                raise ValueError(
+                    f"Non-finite log_pi at sweep={sweep}, block={block_id}, active={active.tolist()}, "
+                    f"log_pi={log_pi}"
+                )
+
+            q = _proposal(proposal_kind, state_space.states)
+            p, pi = build_mh_transition_matrix(log_pi, q)
+
+            if not np.all(np.isfinite(p)):
+                raise ValueError(
+                    f"Non-finite transition matrix at sweep={sweep}, block={block_id}, active={active.tolist()}, "
+                    f"p={p}, log_pi={log_pi}"
+                )
             q = _proposal(proposal_kind, state_space.states)
             p, pi = build_mh_transition_matrix(log_pi, q)
             current_state = _current_local_state_index(state_space.states, theta[active])
 
-            diag = _diagnose_block(cfg, p, current_state, backend, shots=shots, seed=cfg.sampling.random_seed + 97 * sweep + block_id)
+            diag = _diagnose_block(
+                cfg, p, current_state, backend,
+                shots=shots,
+                seed=cfg.sampling.random_seed + 97 * sweep + block_id,
+                target_pi=pi,
+            )
             empirical = diag.get("empirical_state_probs", {})
             if not empirical:
                 raise RuntimeError(f"No empirical state probabilities recovered for block {block_id}")

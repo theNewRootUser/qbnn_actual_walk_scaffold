@@ -49,13 +49,27 @@ def build_mh_transition_matrix(log_pi: np.ndarray, proposal: np.ndarray) -> tupl
 
 
 def stationary_distribution(p: np.ndarray) -> np.ndarray:
+    p = np.asarray(p, dtype=np.float64)
+
     vals, vecs = np.linalg.eig(p.T)
     idx = int(np.argmin(np.abs(vals - 1.0)))
-    vec = np.real(vecs[:, idx])
-    vec = np.maximum(vec, 0.0)
-    if vec.sum() <= 0:
-        vec = np.abs(vec)
-    vec /= vec.sum()
+    raw = np.real(vecs[:, idx])
+
+    # Eigenvectors are only defined up to a global sign.
+    if raw.sum() < 0:
+        raw = -raw
+
+    vec = np.maximum(raw, 0.0)
+    s = vec.sum()
+
+    if s <= 0 or not np.isfinite(s):
+        vec = np.abs(raw)
+        s = vec.sum()
+
+    if s <= 0 or not np.isfinite(s):
+        raise ValueError(f"Could not recover valid stationary eigenvector from p={p}")
+
+    vec /= s
     return vec
 
 

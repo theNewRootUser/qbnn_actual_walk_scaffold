@@ -16,7 +16,7 @@ model:
   fc_hidden: 30
 
 sampling:
-  sweeps_total: 6
+  sweeps_total: 1
   final_sweeps: 1
   exploratory_shots: 256
   final_shots: 1024
