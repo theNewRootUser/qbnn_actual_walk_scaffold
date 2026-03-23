@@ -13,6 +13,7 @@ def main():
     ap.add_argument("--config", required=True)
     args = ap.parse_args()
     cfg = load_config(args.config)
+    print("reference_theta_path repr =", repr(cfg.quantum.extra.get("reference_theta_path")))
     out = diagnose_quantum_experiment(cfg)
     print(json.dumps(out, indent=2))
 

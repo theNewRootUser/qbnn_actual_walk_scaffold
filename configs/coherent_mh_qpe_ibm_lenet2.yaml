@@ -33,13 +33,14 @@ partition:
 quantum:
   backend_name: ibm_fez
   execution_mode: ibm
+  instance: null
   family: coherent_mh
   pe_mode: qpe
   num_eval_qubits: 4
   optimization_level: 1
   service_channel: null
   extra:
-    reference_theta_path: outputs/classical_lenet2_zipcode.json
+    reference_theta_path: null
     discretization_bits: 1
     quant_step: 0.05
     proposal_kind: hamming

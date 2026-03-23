@@ -84,12 +84,25 @@ def _recover_empirical_state_probs(cfg, fam, sample_counts, problem):
     return empirical, sample_counts
 
 def _load_reference_theta(path: str | None, expected_num_params: int) -> np.ndarray:
-    if not path:
+    if path is None:
         return np.zeros(expected_num_params, dtype=np.float64)
+
+    if isinstance(path, str) and path.strip().lower() in {"", "null", "none"}:
+        return np.zeros(expected_num_params, dtype=np.float64)
+
     p = Path(path)
+    if not p.exists():
+        return np.zeros(expected_num_params, dtype=np.float64)
+
     with p.open("r", encoding="utf-8") as f:
         raw = json.load(f)
-    theta = np.asarray(raw["result"]["theta_map"] if "theta_map" in raw.get("result", {}) else raw["result"]["result"]["theta_map"], dtype=np.float64)
+
+    theta = np.asarray(
+        raw["result"]["theta_map"]
+        if "theta_map" in raw.get("result", {})
+        else raw["result"]["result"]["theta_map"],
+        dtype=np.float64,
+    )
     if theta.size != expected_num_params:
         raise ValueError(f"reference theta has size {theta.size}, expected {expected_num_params}")
     return theta
@@ -107,7 +120,7 @@ def _run_counts(cfg, circuit, shots, seed, backend=None):
     elif cfg.quantum.execution_mode == "noisy":
         out = run_noisy_sampler(circuit, backend=backend, shots=shots, seed=seed)
     elif cfg.quantum.execution_mode == "ibm":
-        out = run_ibm_sampler(circuit, backend=backend, shots=shots, seed=seed)
+        out = run_ibm_sampler(circuit, backend=backend, shots=shots)
     else:
         raise ValueError(f"Unknown execution_mode: {cfg.quantum.execution_mode}")
 
@@ -119,7 +132,7 @@ def _run_counts(cfg, circuit, shots, seed, backend=None):
 def _get_backend_for_reports(cfg: ExperimentConfig):
     if cfg.quantum.execution_mode == "ibm":
         service = build_service(channel=cfg.quantum.service_channel, instance=cfg.quantum.instance)
-        return get_backend(service, cfg.quantum.backend_name)
+        return get_backend(service, cfg.quantum.backend_name, cfg.quantum.instance)
     fake = build_local_fake_backend(cfg.quantum.backend_name)
     return fake
 
