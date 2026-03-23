@@ -31,13 +31,13 @@ partition:
   block_param_count: 1
 
 quantum:
+  backend_name: ibm_fez
   execution_mode: ibm
   family: coherent_mh
   pe_mode: qpe
   num_eval_qubits: 4
   optimization_level: 1
-  service_channel: ibm_quantum_platform
-  backend_name: null
+  service_channel: null
   extra:
     reference_theta_path: outputs/classical_lenet2_zipcode.json
     discretization_bits: 1

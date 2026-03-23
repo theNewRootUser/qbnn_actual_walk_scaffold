@@ -207,49 +207,82 @@ def _diagnose_block(cfg: ExperimentConfig, p: np.ndarray, current_state: int, ba
             p,
             num_eval_qubits=cfg.quantum.num_eval_qubits,
             max_dense_states=int(cfg.quantum.extra.get("max_dense_szegedy_states", 16)),
+            target_pi=target_pi,
         )
         diag = {"family": fam, "logical": problem.logical_info}
 
         if problem.sample_circuit is None:
-            if target_pi is None:
-                target_pi = stationary_distribution(p)
-            empirical = {i: float(v) for i, v in enumerate(target_pi) if float(v) > 0.0}
-            diag.update({
-                "sample_counts": {},
-                "empirical_state_probs": empirical,
-                "sample_resources": None,
-            })
-            return diag
+            if cfg.quantum.execution_mode == "ideal":
+                if target_pi is None:
+                    target_pi = stationary_distribution(p)
+                empirical = {i: float(v) for i, v in enumerate(target_pi) if float(v) > 0.0}
+                diag.update({
+                    "sample_counts": {},
+                    "empirical_state_probs": empirical,
+                    "sample_resources": None,
+                    "transpiled_sample_resources": None,
+                    "qpe_counts": None,
+                })
+                return diag
+
+            raise RuntimeError(
+                "Szegedy sample_circuit is None in noisy/ibm mode. "
+                "This would fall back to exact classical pi, not a faithful quantum run."
+            )
 
         sample_counts = _run_counts(
-            cfg, problem.sample_circuit, shots=shots, seed=seed, backend=backend_for_reports
+            cfg,
+            problem.sample_circuit,
+            shots=shots,
+            seed=seed,
+            backend=backend_for_reports,
         )
-        if isinstance(sample_counts, dict) and "counts" in sample_counts and isinstance(sample_counts["counts"],
-                                                                                        dict):
+        if isinstance(sample_counts, dict) and "counts" in sample_counts and isinstance(sample_counts["counts"], dict):
             sample_counts = sample_counts["counts"]
 
-        state_qubits = problem.logical_info["state_qubits"]
-        eval_qubits = cfg.quantum.num_eval_qubits
-        max_len = max((len(str(k).replace(" ", "")) for k in sample_counts.keys()), default=0)
+        state_qubits = int(problem.logical_info["state_qubits"])
+        eval_qubits = int(cfg.quantum.num_eval_qubits)
+
+        max_len = 0
+        if sample_counts:
+            max_len = max(len(str(k).replace(" ", "")) for k in sample_counts.keys())
 
         if max_len >= eval_qubits + state_qubits:
             empirical = szegedy_zero_phase_state_probs(
-                sample_counts, eval_qubits=eval_qubits, state_qubits=state_qubits
+                sample_counts,
+                eval_qubits=eval_qubits,
+                state_qubits=state_qubits,
             )
         else:
             empirical = state_probs_from_counts(
-                sample_counts, state_qubits=state_qubits, measured_register="tail"
+                sample_counts,
+                state_qubits=state_qubits,
+                measured_register="tail",
             )
 
-        if not empirical and target_pi is not None:
-            empirical = {i: float(v) for i, v in enumerate(target_pi) if float(v) > 0.0}
+        if not empirical:
+            raise RuntimeError(
+                "Szegedy sample circuit ran, but no empirical state probabilities could be decoded."
+            )
 
         diag.update({
             "sample_counts": sample_counts,
             "empirical_state_probs": empirical,
             "sample_resources": logical_resource_report(problem.sample_circuit),
+            "qpe_counts": None,
         })
+
+        if backend_for_reports is not None:
+            diag["transpiled_sample_resources"] = transpiled_resource_report(
+                problem.sample_circuit,
+                backend_for_reports,
+                optimization_level=cfg.quantum.optimization_level,
+            )
+        else:
+            diag["transpiled_sample_resources"] = None
+
         return diag
+
     raise ValueError(f"Unknown family: {fam}")
 
 

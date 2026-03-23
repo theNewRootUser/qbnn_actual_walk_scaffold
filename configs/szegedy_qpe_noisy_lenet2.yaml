@@ -34,7 +34,7 @@ quantum:
   execution_mode: noisy
   family: szegedy
   pe_mode: qpe
-  num_eval_qubits: 4
+  num_eval_qubits: 3
   optimization_level: 1
   extra:
     reference_theta_path: outputs/classical_lenet2_zipcode.json
