@@ -1,6 +1,6 @@
 from __future__ import annotations
 import numpy as np
-from src.qbnn.models import BayesianLeNet2
+from src.qbnn.models import BayesianNet2
 
 
 def build_local_log_posterior(model: BayesianLeNet2, theta_ref: np.ndarray, active_indices: np.ndarray, local_states: np.ndarray, x_train: np.ndarray, y_train: np.ndarray) -> np.ndarray:

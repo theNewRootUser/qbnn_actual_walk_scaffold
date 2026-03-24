@@ -1,2 +1,2 @@
-from .bnn import BayesianLeNet2, build_bayesian_model, predictive_metrics_from_samples
+from .bnn import BayesianNet2, build_bayesian_model, predictive_metrics_from_samples
 from .torch_lenet2 import train_deterministic_lenet2, torch_model_to_theta

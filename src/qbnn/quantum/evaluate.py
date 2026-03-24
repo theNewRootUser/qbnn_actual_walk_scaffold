@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import numpy as np
-from src.qbnn.models import BayesianLeNet2, predictive_metrics_from_samples
+from src.qbnn.models import BayesianNet2, predictive_metrics_from_samples
 
 
 def distribution_diagnostics(empirical: dict[int, float] | np.ndarray, target: np.ndarray) -> dict:

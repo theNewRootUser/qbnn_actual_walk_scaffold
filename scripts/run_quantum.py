@@ -1,7 +1,8 @@
 from __future__ import annotations
 import argparse, json
 import os, sys
-sys.path.append('/home/dario/Desktop/qbnn_actual_walk_scaffold')
+PATH = r"C:\Users\dario\Downloads\qbnn_actual_walk_scaffold\qbnn_actual_walk_scaffold"
+sys.path.append(PATH)
 from src.qbnn.config import load_config
 from src.qbnn.experiments import run_quantum_experiment
 

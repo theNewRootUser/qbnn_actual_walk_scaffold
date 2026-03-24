@@ -6,6 +6,7 @@ from typing import Dict
 import numpy as np
 import torch
 from torch import nn
+import torch.nn.functional as F
 from torch.utils.data import DataLoader, TensorDataset
 from sklearn.metrics import accuracy_score
 from src.qbnn.config import ModelConfig, TrainingConfig
@@ -14,39 +15,19 @@ from src.qbnn.config import ModelConfig, TrainingConfig
 class TorchLeNet2(nn.Module):
     def __init__(self, cfg: ModelConfig):
         super().__init__()
-        self.conv1 = nn.Conv2d(cfg.num_channels, cfg.conv1_out, kernel_size=5)
-        self.pool = nn.AvgPool2d(2)
-        self.pool1_gamma = nn.Parameter(torch.ones(cfg.conv1_out))
-        self.pool1_beta = nn.Parameter(torch.zeros(cfg.conv1_out))
-        self.conv2 = nn.Conv2d(cfg.conv1_out, cfg.conv2_out, kernel_size=5)
-        self.conv2_gamma = nn.Parameter(torch.ones(cfg.conv2_out))
-        self.conv2_beta = nn.Parameter(torch.zeros(cfg.conv2_out))
-        self.fc1 = nn.Linear(cfg.conv2_out * 2 * 2, cfg.fc_hidden)
+        self.flatten = nn.Flatten()
+        self.fc1 = nn.Linear(cfg.num_channels, cfg.fc_hidden)
         self.fc2 = nn.Linear(cfg.fc_hidden, cfg.num_classes)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        h = self.conv1(x)
-        h = self.pool(h)
-        h = self.pool1_gamma[None, :, None, None] * h + self.pool1_beta[None, :, None, None]
-        h = torch.tanh(h)
-        h = self.conv2(h)
-        h = self.conv2_gamma[None, :, None, None] * h + self.conv2_beta[None, :, None, None]
-        h = torch.tanh(h)
-        h = h.reshape(h.shape[0], -1)
-        h = torch.tanh(self.fc1(h))
-        return self.fc2(h)
+        x = self.flatten(x)
+        h = self.fc1(x)
+        h = self.fc2(h)
+        return h
 
 
 def torch_model_to_theta(model: TorchLeNet2) -> np.ndarray:
     pieces = [
-        model.conv1.weight.detach().cpu().numpy().reshape(-1),
-        model.conv1.bias.detach().cpu().numpy().reshape(-1),
-        model.pool1_gamma.detach().cpu().numpy().reshape(-1),
-        model.pool1_beta.detach().cpu().numpy().reshape(-1),
-        model.conv2.weight.detach().cpu().numpy().reshape(-1),
-        model.conv2.bias.detach().cpu().numpy().reshape(-1),
-        model.conv2_gamma.detach().cpu().numpy().reshape(-1),
-        model.conv2_beta.detach().cpu().numpy().reshape(-1),
         model.fc1.weight.detach().cpu().numpy().T.reshape(-1),
         model.fc1.bias.detach().cpu().numpy().reshape(-1),
         model.fc2.weight.detach().cpu().numpy().T.reshape(-1),
@@ -68,7 +49,8 @@ def train_deterministic_lenet2(cfg: ModelConfig, tr_cfg: TrainingConfig, x_train
             xb = xb.to(device)
             yb = yb.to(device)
             opt.zero_grad(set_to_none=True)
-            loss = nn.CrossEntropyLoss()(model(xb), yb)
+            yb_predict = model(xb)
+            loss = nn.CrossEntropyLoss()(yb_predict, yb)
             loss.backward()
             opt.step()
     model.eval()
