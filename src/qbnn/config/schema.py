@@ -50,9 +50,9 @@ class SamplingConfig:
 
 @dataclass
 class QuantumConfig:
-    execution_mode: str = "ideal"   # ideal | noisy | ibm
-    family: str = "coherent_mh"     # coherent_mh | szegedy
     pe_mode: str = "qpe"            # qpe | rall
+    execution_mode: str = "ideal"   # ideal | noisy | ibm
+    family: str = "coherent_mh"     # coherent_mh | szegedy | coherent_metropolis_move
     num_eval_qubits: int = 4
     optimization_level: int = 1
     backend_name: Optional[str] = None

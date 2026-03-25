@@ -14,9 +14,7 @@ def region_aligned_weight_blocks(model, block_param_count: int) -> list[np.ndarr
     needed = ("s_fc1_w", "s_fc1_b", "s_fc2_w", "s_fc2_b")
     missing = [name for name in needed if not hasattr(model, name)]
     if missing:
-        raise ValueError(
-            f"region_aligned_weight_blocks requires model slices {needed}, missing={missing}"
-        )
+        raise ValueError(f"region_aligned_weight_blocks requires model slices {needed}, missing={missing}")
 
     regions = [model.s_fc1_w, model.s_fc1_b, model.s_fc2_w, model.s_fc2_b]
     out: list[np.ndarray] = []

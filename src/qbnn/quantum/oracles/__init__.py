@@ -1,1 +1,2 @@
 from .local_energy_table import build_local_log_posterior
+from .local_delta_oracle import build_local_move_table
