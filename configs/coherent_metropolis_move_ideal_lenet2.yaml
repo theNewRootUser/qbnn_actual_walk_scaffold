@@ -1,0 +1,44 @@
+name: coherent_metropolis_move_ideal_lenet2
+
+data:
+  dataset_name: zipcode
+  npz_path: data/zipcode/zipcode.npz
+
+model:
+  architecture: lenet2
+  prior_std: 1.0
+  image_height: 16
+  image_width: 16
+  num_channels: 1
+  num_classes: 10
+  fc_hidden: 12
+
+sampling:
+  sweeps_total: 16
+  final_sweeps: 4
+  exploratory_shots: 256
+  final_shots: 1024
+  theta_samples_per_block: 1
+  random_seed: 1234
+  save_all_sweeps: true
+  score_only_final_sweeps: true
+
+partition:
+  enabled: true
+  strategy: region_aligned_weight_blocks
+  block_param_count: 256
+
+quantum:
+  execution_mode: ideal
+  family: coherent_metropolis_move
+  pe_mode: qpe
+  num_eval_qubits: 0
+  optimization_level: 1
+  backend_name: ibm_torino
+  extra:
+    discretization_bits: 1
+    quant_step: 0.05
+    reference_theta_path: null
+    direction_bank_size: 16
+    direction_step: 0.025
+    diagnostic_block_count: 3
