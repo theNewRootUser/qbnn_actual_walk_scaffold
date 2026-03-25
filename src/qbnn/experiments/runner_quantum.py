@@ -1,26 +1,54 @@
+
 from __future__ import annotations
 from dataclasses import asdict
 from pathlib import Path
 import json
 from typing import Any, Dict
 import numpy as np
+
 from src.qbnn.config import ExperimentConfig
 from src.qbnn.data import load_zipcode_dataset
-from src.qbnn.discretization import FixedPointCodec, build_local_state_space, build_complete_graph_proposal, build_hamming_graph_proposal, build_mh_transition_matrix, stationary_distribution, detailed_balance_error
+from src.qbnn.discretization import (
+    FixedPointCodec,
+    build_local_state_space,
+    build_complete_graph_proposal,
+    build_hamming_graph_proposal,
+    build_mh_transition_matrix,
+    stationary_distribution,
+    detailed_balance_error,
+)
 from src.qbnn.models import build_bayesian_model
 from src.qbnn.partition import build_partition_blocks
 from src.qbnn.quantum.oracles import build_local_log_posterior
-from src.qbnn.quantum.circuits import build_coherent_mh_problem, build_szegedy_qpe_problem
-from src.qbnn.quantum.execution import run_ideal_sampler, run_noisy_sampler, build_local_fake_backend, build_service, get_backend, run_ibm_sampler
-from src.qbnn.quantum.posterior_sampling import state_probs_from_counts, szegedy_zero_phase_state_probs, sample_state_indices, embed_local_samples
-from src.qbnn.quantum.evaluate import evaluate_theta_samples, distribution_diagnostics
-from src.qbnn.quantum.resources import logical_resource_report, transpiled_resource_report
-from src.qbnn.proposals import build_signed_direction_moves
-from src.qbnn.quantum.oracles.local_delta_oracle import build_local_move_table
 from src.qbnn.quantum.circuits import (
     build_coherent_mh_problem,
     build_coherent_metropolis_move_problem,
     build_szegedy_qpe_problem,
+)
+from src.qbnn.quantum.execution import (
+    run_ideal_sampler,
+    run_noisy_sampler,
+    build_local_fake_backend,
+    build_service,
+    get_backend,
+    run_ibm_sampler,
+)
+from src.qbnn.quantum.posterior_sampling import (
+    state_probs_from_counts,
+    szegedy_zero_phase_state_probs,
+    sample_state_indices,
+    embed_local_samples,
+)
+from src.qbnn.quantum.evaluate import evaluate_theta_samples, distribution_diagnostics
+from src.qbnn.quantum.resources import logical_resource_report, transpiled_resource_report
+from src.qbnn.proposals import (
+    build_signed_direction_moves,
+    build_hidden_pathway_moves,
+    build_output_bias_moves,
+)
+from src.qbnn.quantum.oracles.local_delta_oracle import (
+    build_local_move_table,
+    build_hidden_pathway_move_table,
 )
 
 
@@ -28,6 +56,7 @@ def _pget(problem, key, default=None):
     if isinstance(problem, dict):
         return problem.get(key, default)
     return getattr(problem, key, default)
+
 
 def _unwrap_counts(out):
     if isinstance(out, dict) and "counts" in out and isinstance(out["counts"], dict):
@@ -59,7 +88,6 @@ def _recover_empirical_state_probs(cfg, fam, sample_counts, problem):
     if fam == "coherent_metropolis_move":
         raise RuntimeError("coherent_metropolis_move should use _diagnose_move_block, not _diagnose_block")
 
-
     if fam == "szegedy":
         max_len = 0
         if sample_counts:
@@ -87,13 +115,13 @@ def _recover_empirical_state_probs(cfg, fam, sample_counts, problem):
 
         return empirical, sample_counts
 
-    # generic fallback
     empirical = state_probs_from_counts(
         sample_counts,
         state_qubits=state_qubits,
         measured_register="tail",
     )
     return empirical, sample_counts
+
 
 def _load_reference_theta(path: str | None, expected_num_params: int) -> np.ndarray:
     if path is None:
@@ -154,8 +182,6 @@ def _current_local_state_index(local_states: np.ndarray, center_values: np.ndarr
     return int(np.argmin(d2))
 
 
-
-
 def _build_blocks(cfg: ExperimentConfig, model) -> list[np.ndarray]:
     if cfg.partition.strategy == "explicit_indices" and cfg.partition.explicit_blocks:
         return build_partition_blocks(
@@ -164,7 +190,7 @@ def _build_blocks(cfg: ExperimentConfig, model) -> list[np.ndarray]:
             explicit=cfg.partition.explicit_blocks,
         )
 
-    if cfg.partition.strategy == "region_aligned_weight_blocks":
+    if cfg.partition.strategy in {"region_aligned_weight_blocks", "hidden_pathway_blocks"}:
         return build_partition_blocks(
             model.num_params,
             cfg.partition.strategy,
@@ -178,21 +204,8 @@ def _build_blocks(cfg: ExperimentConfig, model) -> list[np.ndarray]:
         block_param_count=cfg.partition.block_param_count,
     )
 
+
 def _decode_move_counts(counts: dict, dir_bits: int, actual_num_moves: int) -> dict:
-    """
-    Decode measurement counts for coherent_metropolis_move.
-
-    Measurement layout in the circuit:
-      c[0:dir_bits]   <- d
-      c[dir_bits]     <- s
-      c[dir_bits + 1] <- a
-
-    Qiskit returns count strings as:
-      a s d_{k-1} ... d0
-
-    Any decoded move index >= actual_num_moves is a padded dummy move and must
-    be treated as reject / no-op.
-    """
     out: dict[int | str, float] = {}
     total = float(sum(counts.values())) if counts else 0.0
     if total <= 0:
@@ -223,18 +236,9 @@ def _sample_move_from_probs(move_probs: dict, rng: np.random.Generator):
 
 
 def _apply_sampled_move(theta, active, move_table, move_choice):
-    """
-    Apply a sampled move to the active block.
-
-    Safe handling:
-    - "reject" / None / invalid values -> no-op
-    - padded dummy move indices -> no-op
-    - valid integer move indices -> apply proposal state
-    """
     theta_new = np.asarray(theta, dtype=np.float64).copy()
     active = np.asarray(active, dtype=np.int64)
 
-    # Explicit reject / no-op cases
     if move_choice is None:
         return theta_new
 
@@ -254,7 +258,6 @@ def _apply_sampled_move(theta, active, move_table, move_choice):
     proposal_states = np.asarray(move_table.proposal_states, dtype=np.float64)
     num_actual_moves = int(proposal_states.shape[0])
 
-    # Dummy padded move or invalid index -> reject / no-op
     if move_idx < 0 or move_idx >= num_actual_moves:
         return theta_new
 
@@ -262,9 +265,79 @@ def _apply_sampled_move(theta, active, move_table, move_choice):
     return theta_new
 
 
-
 def _representative_only(items: list[dict], keep: int) -> list[dict]:
     return items[:keep]
+
+
+def _is_output_bias_block(active: np.ndarray, model) -> bool:
+    active = np.asarray(active, dtype=np.int64)
+    return np.all((active >= int(model.s_fc2_b.start)) & (active < int(model.s_fc2_b.stop)))
+
+
+def _build_move_table(cfg: ExperimentConfig, model, theta_ref: np.ndarray, active: np.ndarray, data: dict):
+    move_family = str(cfg.quantum.extra.get("move_family", "direction_bank")).strip().lower()
+
+    if move_family == "hidden_pathway":
+        if _is_output_bias_block(active, model):
+            bias_step = float(cfg.quantum.extra.get("output_bias_step", cfg.quantum.extra.get("direction_step", 0.025)))
+            moves = build_output_bias_moves(
+                model,
+                active,
+                theta_ref,
+                bias_step=bias_step,
+            )
+            move_table = build_local_move_table(
+                model,
+                theta_ref,
+                active,
+                moves.proposal_states,
+                moves.move_labels,
+                data["x_train"],
+                data["y_train"],
+            )
+            return move_table, {"move_family": "output_bias", "num_directions": int(moves.num_directions)}
+
+        step_in = float(cfg.quantum.extra.get("hidden_step_in", cfg.quantum.extra.get("direction_step", 0.025)))
+        step_out = float(cfg.quantum.extra.get("hidden_step_out", step_in))
+        bias_step = float(cfg.quantum.extra.get("hidden_bias_step", step_in))
+
+        moves = build_hidden_pathway_moves(
+            model,
+            active,
+            theta_ref,
+            step_in=step_in,
+            step_out=step_out,
+            bias_step=bias_step,
+        )
+        move_table = build_hidden_pathway_move_table(
+            model,
+            theta_ref,
+            active,
+            moves.proposal_states,
+            moves.move_labels,
+            data["x_train"],
+            data["y_train"],
+        )
+        return move_table, {"move_family": "hidden_pathway", "num_directions": int(moves.num_directions)}
+
+    direction_step = float(cfg.quantum.extra.get("direction_step", 0.025))
+    direction_bank_size = int(cfg.quantum.extra.get("direction_bank_size", 16))
+    moves = build_signed_direction_moves(
+        active,
+        theta_ref,
+        direction_bank_size=direction_bank_size,
+        direction_step=direction_step,
+    )
+    move_table = build_local_move_table(
+        model,
+        theta_ref,
+        active,
+        moves.proposal_states,
+        moves.move_labels,
+        data["x_train"],
+        data["y_train"],
+    )
+    return move_table, {"move_family": "direction_bank", "num_directions": int(moves.num_directions)}
 
 
 def _diagnose_block(cfg: ExperimentConfig, p: np.ndarray, current_state: int, backend_for_reports, shots: int, seed: int, target_pi) -> dict:
@@ -282,7 +355,6 @@ def _diagnose_block(cfg: ExperimentConfig, p: np.ndarray, current_state: int, ba
             cfg, problem.sample_circuit, shots=shots, seed=seed, backend=backend_for_reports
         )
 
-        # Be tolerant if some execution layer still returns {"counts": ..., "metadata": ...}
         if isinstance(sample_counts, dict) and "counts" in sample_counts and isinstance(sample_counts["counts"], dict):
             sample_counts = sample_counts["counts"]
 
@@ -292,7 +364,6 @@ def _diagnose_block(cfg: ExperimentConfig, p: np.ndarray, current_state: int, ba
             measured_register="tail",
         )
 
-        # Fallback for local development: use the exact transition row if count parsing fails.
         if not empirical:
             row = problem.logical_info.get("current_row_distribution")
             if row is not None:
@@ -421,29 +492,13 @@ def diagnose_quantum_experiment(cfg: ExperimentConfig) -> dict:
     codec = FixedPointCodec(bits=int(cfg.quantum.extra.get("discretization_bits", 1)), step=float(cfg.quantum.extra.get("quant_step", 0.05)))
     proposal_kind = str(cfg.quantum.extra.get("proposal_kind", "hamming"))
     blocks = _build_blocks(cfg, model)
-    rng = np.random.default_rng(cfg.sampling.random_seed)
     backend = _get_backend_for_reports(cfg)
     max_blocks = int(cfg.quantum.extra.get("diagnostic_block_count", 3))
     block_reports = []
+
     for block_id, active in enumerate(blocks[:max_blocks]):
         if cfg.quantum.family == "coherent_metropolis_move":
-            direction_step = float(cfg.quantum.extra.get("direction_step", 0.025))
-            direction_bank_size = int(cfg.quantum.extra.get("direction_bank_size", 16))
-            moves = build_signed_direction_moves(
-                active,
-                theta_ref,
-                direction_bank_size=direction_bank_size,
-                direction_step=direction_step,
-            )
-            move_table = build_local_move_table(
-                model,
-                theta_ref,
-                active,
-                moves.proposal_states,
-                moves.move_labels,
-                data["x_train"],
-                data["y_train"],
-            )
+            move_table, move_meta = _build_move_table(cfg, model, theta_ref, active, data)
             rep = _diagnose_move_block(
                 cfg,
                 move_table,
@@ -455,15 +510,16 @@ def diagnose_quantum_experiment(cfg: ExperimentConfig) -> dict:
             rep["active_indices"] = active.tolist()
             rep["block_size"] = int(active.size)
             rep["num_moves"] = int(move_table.accept_probs.size)
+            rep["move_family"] = move_meta["move_family"]
             block_reports.append(rep)
             continue
+
         state_space = build_local_state_space(active, theta_ref, codec)
         log_pi = build_local_log_posterior(model, theta_ref, active, state_space.states, data["x_train"], data["y_train"])
 
         if not np.all(np.isfinite(log_pi)):
             raise ValueError(
-                f"Non-finite log_pi at sweep={sweep}, block={block_id}, active={active.tolist()}, "
-                f"log_pi={log_pi}"
+                f"Non-finite log_pi at block={block_id}, active={active.tolist()}, log_pi={log_pi}"
             )
 
         q = _proposal(proposal_kind, state_space.states)
@@ -471,11 +527,8 @@ def diagnose_quantum_experiment(cfg: ExperimentConfig) -> dict:
 
         if not np.all(np.isfinite(p)):
             raise ValueError(
-                f"Non-finite transition matrix at sweep={sweep}, block={block_id}, active={active.tolist()}, "
-                f"p={p}, log_pi={log_pi}"
+                f"Non-finite transition matrix at block={block_id}, active={active.tolist()}, p={p}, log_pi={log_pi}"
             )
-        q = _proposal(proposal_kind, state_space.states)
-        p, pi = build_mh_transition_matrix(log_pi, q)
         current_state = _current_local_state_index(state_space.states, theta_ref[active])
         rep = _diagnose_block(
             cfg, p, current_state, backend,
@@ -490,6 +543,7 @@ def diagnose_quantum_experiment(cfg: ExperimentConfig) -> dict:
         rep["target_stationary_distribution"] = pi.tolist()
         rep["distribution_metrics"] = distribution_diagnostics(rep.get("empirical_state_probs", {}), pi) if rep.get("empirical_state_probs") else None
         block_reports.append(rep)
+
     return {"config": asdict(cfg), "diagnostics": block_reports}
 
 
@@ -507,35 +561,19 @@ def run_quantum_experiment(cfg: ExperimentConfig) -> dict:
     diagnostic_block_limit = int(cfg.quantum.extra.get("diagnostic_block_count", 3))
 
     for sweep in range(cfg.sampling.sweeps_total):
-
         is_final = sweep >= (cfg.sampling.sweeps_total - cfg.sampling.final_sweeps)
         shots = cfg.sampling.final_shots if is_final else cfg.sampling.exploratory_shots
         per_block = []
+
         for block_id, active in enumerate(blocks):
             if cfg.quantum.family == "coherent_metropolis_move":
-                direction_step = float(cfg.quantum.extra.get("direction_step", 0.025))
-                direction_bank_size = int(cfg.quantum.extra.get("direction_bank_size", 16))
-                moves = build_signed_direction_moves(
-                    active,
-                    theta,
-                    direction_bank_size=direction_bank_size,
-                    direction_step=direction_step,
-                )
-                move_table = build_local_move_table(
-                    model,
-                    theta,
-                    active,
-                    moves.proposal_states,
-                    moves.move_labels,
-                    data["x_train"],
-                    data["y_train"],
-                )
+                move_table, move_meta = _build_move_table(cfg, model, theta, active, data)
+
                 if sweep == 0 and block_id == 0:
                     print("\n=== DEBUG FIRST BLOCK MOVE TABLE ===")
                     print(f"active size = {len(active)}")
                     print(f"num moves = {len(move_table.proposal_states)}")
                     print(f"log_pi_current = {float(move_table.log_pi_current):.8f}")
-
                     k = min(8, len(move_table.proposal_states))
                     for i in range(k):
                         print(
@@ -543,6 +581,7 @@ def run_quantum_experiment(cfg: ExperimentConfig) -> dict:
                             f"log_pi_proposed = {float(move_table.log_pi_proposals[i]):.8f} | "
                             f"accept_prob = {float(move_table.accept_probs[i]):.8f}"
                         )
+
                 diag = _diagnose_move_block(
                     cfg,
                     move_table,
@@ -550,15 +589,18 @@ def run_quantum_experiment(cfg: ExperimentConfig) -> dict:
                     shots=shots,
                     seed=cfg.sampling.random_seed + 97 * sweep + block_id,
                 )
+
                 if sweep == 0 and block_id == 0:
                     print("\n=== DEBUG FIRST BLOCK COUNTS ===")
                     print(diag.get("sample_counts"))
+
                 move_probs = diag.get("empirical_move_probs", {})
                 if not move_probs:
                     raise RuntimeError(f"No empirical move probabilities recovered for block {block_id}")
                 move_choice = _sample_move_from_probs(move_probs, rng)
                 if move_choice is not None and move_choice != "reject":
                     theta = _apply_sampled_move(theta, active, move_table, move_choice)
+
                 info = {
                     "block_id": block_id,
                     "active_indices": active.tolist(),
@@ -566,6 +608,7 @@ def run_quantum_experiment(cfg: ExperimentConfig) -> dict:
                     "num_moves": int(move_table.accept_probs.size),
                     "shots": int(shots),
                     "move_choice": move_choice,
+                    "move_family": move_meta["move_family"],
                     "logical": diag.get("logical"),
                 }
                 if block_id < diagnostic_block_limit:
@@ -573,13 +616,13 @@ def run_quantum_experiment(cfg: ExperimentConfig) -> dict:
                     info["transpiled_sample_resources"] = diag.get("transpiled_sample_resources")
                 per_block.append(info)
                 continue
+
             state_space = build_local_state_space(active, theta, codec)
             log_pi = build_local_log_posterior(model, theta, active, state_space.states, data["x_train"], data["y_train"])
 
             if not np.all(np.isfinite(log_pi)):
                 raise ValueError(
-                    f"Non-finite log_pi at sweep={sweep}, block={block_id}, active={active.tolist()}, "
-                    f"log_pi={log_pi}"
+                    f"Non-finite log_pi at sweep={sweep}, block={block_id}, active={active.tolist()}, log_pi={log_pi}"
                 )
 
             q = _proposal(proposal_kind, state_space.states)
@@ -587,11 +630,8 @@ def run_quantum_experiment(cfg: ExperimentConfig) -> dict:
 
             if not np.all(np.isfinite(p)):
                 raise ValueError(
-                    f"Non-finite transition matrix at sweep={sweep}, block={block_id}, active={active.tolist()}, "
-                    f"p={p}, log_pi={log_pi}"
+                    f"Non-finite transition matrix at sweep={sweep}, block={block_id}, active={active.tolist()}, p={p}, log_pi={log_pi}"
                 )
-            q = _proposal(proposal_kind, state_space.states)
-            p, pi = build_mh_transition_matrix(log_pi, q)
             current_state = _current_local_state_index(state_space.states, theta[active])
 
             diag = _diagnose_block(
@@ -621,6 +661,7 @@ def run_quantum_experiment(cfg: ExperimentConfig) -> dict:
                 info["transpiled_sample_resources"] = diag.get("transpiled_sample_resources")
                 info["qpe_counts"] = diag.get("qpe_counts")
             per_block.append(info)
+
         saved_thetas.append(theta.copy())
         sweep_reports.append({"sweep": sweep, "shots": shots, "is_final": is_final, "blocks": per_block})
 
@@ -641,8 +682,9 @@ def run_quantum_experiment(cfg: ExperimentConfig) -> dict:
         },
     }
 
+
 def _diagnose_move_block(cfg: ExperimentConfig, move_table, backend_for_reports, shots: int, seed: int) -> dict:
-    num_dirs = int(cfg.quantum.extra.get("direction_bank_size", 16))
+    num_dirs = int(getattr(move_table, "num_directions", 0) or cfg.quantum.extra.get("direction_bank_size", 16))
     problem = build_coherent_metropolis_move_problem(
         move_table.accept_probs,
         num_directions=num_dirs,
@@ -678,10 +720,8 @@ def _diagnose_move_block(cfg: ExperimentConfig, move_table, backend_for_reports,
         )
     return diag
 
+
 def decode_move_bitstring(bitstring: str, dir_bits: int):
-    # Qiskit count strings are c[n-1] ... c[0]
-    # With c = [d0, d1, ..., d_{k-1}, s, a], the string is:
-    #   a s d_{k-1} ... d0
     if len(bitstring) != dir_bits + 2:
         raise ValueError(f"expected bitstring length {dir_bits + 2}, got {len(bitstring)}")
 

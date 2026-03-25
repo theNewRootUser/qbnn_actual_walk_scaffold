@@ -25,7 +25,7 @@ sampling:
 
 partition:
   enabled: true
-  strategy: region_aligned_weight_blocks
+  strategy: hidden_pathway_blocks
   block_param_count: 256
 
 quantum:
@@ -38,7 +38,12 @@ quantum:
   extra:
     discretization_bits: 1
     quant_step: 0.05
-    reference_theta_path: null
+    reference_theta_path: outputs/init_small_prior_lenet2.json
     direction_bank_size: 16
-    direction_step: 0.025
+    direction_step: 0.5
     diagnostic_block_count: 3
+    move_family: hidden_pathway
+    hidden_step_in: 0.05
+    hidden_step_out: 0.05
+    hidden_bias_step: 0.05
+    output_bias_step: 0.05
