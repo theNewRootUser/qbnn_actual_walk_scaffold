@@ -1,4 +1,4 @@
-name: coherent_mh_qpe_ibm_lenet2
+name: coherent_mh_sparse_block32
 
 data:
   dataset_name: zipcode
@@ -12,11 +12,9 @@ model:
   num_channels: 1
   num_classes: 10
   fc_hidden: 12
-  conv1_out: 12   # optional placeholder if your config parser requires it
-  conv2_out: 6    # optional placeholder if your config parser requires it
 
 sampling:
-  sweeps_total: 4
+  sweeps_total: 8
   final_sweeps: 1
   exploratory_shots: 256
   final_shots: 1024
@@ -27,22 +25,23 @@ sampling:
 
 partition:
   enabled: true
-  strategy: contiguous_weight_blocks
-  block_param_count: 1
+  strategy: region_aligned_weight_blocks
+  block_param_count: 32
 
 quantum:
-  backend_name: ibm_fez
-  execution_mode: ibm
-  instance: null
+  execution_mode: ideal
   family: coherent_mh
   pe_mode: qpe
   num_eval_qubits: 4
   optimization_level: 1
-  service_channel: null
+  backend_name: ibm_torino
   extra:
-    reference_theta_path: null
+    use_sparse_block_kernel: true
     discretization_bits: 1
     quant_step: 0.05
-    proposal_kind: hamming
-    diagnostic_block_count: 2
-    max_dense_diag_states: 32
+    reference_theta_path: outputs/classical_lenet2_zipcode.json
+
+    da_enabled: false
+    surrogate_batch_size: 256
+
+    diagnostic_block_count: 3

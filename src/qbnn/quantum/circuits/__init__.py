@@ -1,2 +1,2 @@
-from .coherent_mh import build_coherent_mh_problem
+from .coherent_mh import build_coherent_mh_problem, build_coherent_row_sampler, build_coherent_mh_row_problem
 from .szegedy_standard import build_szegedy_qpe_problem

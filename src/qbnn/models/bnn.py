@@ -228,7 +228,7 @@ def predictive_metrics_from_samples(model, theta_samples: np.ndarray, x: np.ndar
 
 
 def build_bayesian_model(cfg: ModelConfig):
-    if cfg.architecture == "net2":
+    if cfg.architecture == "lenet2":
         return BayesianNet2(cfg)
     if cfg.architecture == "lenet_like_zipcnn":
         return BayesianLeNetLikeZipCNN(cfg)  # rename your current class to this

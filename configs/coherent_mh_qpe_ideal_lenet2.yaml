@@ -5,20 +5,20 @@ data:
   npz_path: data/zipcode/zipcode.npz
 
 model:
-  architecture: lenet2
+  architecture: net2
   prior_std: 1.0
   image_height: 16
   image_width: 16
   num_channels: 1
   num_classes: 10
-  conv1_out: 12
-  conv2_out: 6
-  fc_hidden: 30
+  fc_hidden: 12
+  conv1_out: 12   # optional placeholder if your config parser requires it
+  conv2_out: 6    # optional placeholder if your config parser requires it
 
 sampling:
   sweeps_total: 1
   final_sweeps: 1
-  exploratory_shots: 256
+  exploratory_shots: 64
   final_shots: 1024
   theta_samples_per_block: 1
   random_seed: 1234
@@ -28,7 +28,7 @@ sampling:
 partition:
   enabled: true
   strategy: contiguous_weight_blocks
-  block_param_count: 1
+  block_param_count: 2
 
 quantum:
   execution_mode: ideal
@@ -37,8 +37,8 @@ quantum:
   num_eval_qubits: 4
   optimization_level: 1
   extra:
-    reference_theta_path: outputs/classical_lenet2_zipcode.json
-    discretization_bits: 1
+    reference_theta_path: null
+    discretization_bits: 3
     quant_step: 0.05
     proposal_kind: hamming
     diagnostic_block_count: 3

@@ -16,7 +16,7 @@ model:
   prior_std: 1.0
   image_height: 16
   image_width: 16
-  num_channels: 1
+  num_channels: 256
   num_classes: 10
   conv1_out: 12
   conv2_out: 6
