@@ -14,8 +14,8 @@ model:
   fc_hidden: 12
 
 sampling:
-  sweeps_total: 16
-  final_sweeps: 4
+  sweeps_total: 50
+  final_sweeps: 10
   exploratory_shots: 256
   final_shots: 1024
   theta_samples_per_block: 1
@@ -26,24 +26,29 @@ sampling:
 partition:
   enabled: true
   strategy: hidden_pathway_blocks
-  block_param_count: 256
+  block_param_count: 128
 
 quantum:
   execution_mode: ideal
   family: coherent_metropolis_move
   pe_mode: qpe
-  num_eval_qubits: 0
+  num_eval_qubits: 1
   optimization_level: 1
   backend_name: ibm_torino
   extra:
-    discretization_bits: 1
+    discretization_bits: 3
     quant_step: 0.05
-    reference_theta_path: outputs/init_small_prior_lenet2.json
+    reference_theta_path: null
     direction_bank_size: 16
     direction_step: 0.5
     diagnostic_block_count: 3
     move_family: hidden_pathway
-    hidden_step_in: 0.05
-    hidden_step_out: 0.05
-    hidden_bias_step: 0.05
+    hidden_step_in: 0.03
+    hidden_step_out: 0.03
+    hidden_bias_step: 0.03
     output_bias_step: 0.05
+    output_mode: zero_sum_one_vs_rest
+    # Leave null to use all class patterns. For lenet2/zipcode that means 10 patterns per hidden unit.
+    # If the move bank gets too large, set this to 4 first.
+    output_pattern_count: null
+    output_reference_class: 0

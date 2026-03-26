@@ -295,11 +295,21 @@ def _build_move_table(cfg: ExperimentConfig, model, theta_ref: np.ndarray, activ
                 data["x_train"],
                 data["y_train"],
             )
+            setattr(move_table, "num_directions", int(moves.num_directions))
             return move_table, {"move_family": "output_bias", "num_directions": int(moves.num_directions)}
 
         step_in = float(cfg.quantum.extra.get("hidden_step_in", cfg.quantum.extra.get("direction_step", 0.025)))
         step_out = float(cfg.quantum.extra.get("hidden_step_out", step_in))
         bias_step = float(cfg.quantum.extra.get("hidden_bias_step", step_in))
+        output_mode = str(cfg.quantum.extra.get("output_mode", "zero_sum_one_vs_rest")).strip()
+        output_reference_class = int(cfg.quantum.extra.get("output_reference_class", 0))
+        output_pattern_count_raw = cfg.quantum.extra.get("output_pattern_count")
+        output_pattern_count = (
+            None
+            if output_pattern_count_raw in {None, "", "null", "none"}
+            else int(output_pattern_count_raw)
+        )
+
 
         moves = build_hidden_pathway_moves(
             model,
@@ -308,6 +318,9 @@ def _build_move_table(cfg: ExperimentConfig, model, theta_ref: np.ndarray, activ
             step_in=step_in,
             step_out=step_out,
             bias_step=bias_step,
+            output_mode=str(cfg.quantum.extra.get("output_mode", "zero_sum_one_vs_rest")),
+            output_reference_class=int(cfg.quantum.extra.get("output_reference_class", 0)),
+            output_pattern_count=cfg.quantum.extra.get("output_pattern_count", None),
         )
         move_table = build_hidden_pathway_move_table(
             model,
@@ -318,6 +331,7 @@ def _build_move_table(cfg: ExperimentConfig, model, theta_ref: np.ndarray, activ
             data["x_train"],
             data["y_train"],
         )
+        setattr(move_table, "num_directions", int(moves.num_directions))
         return move_table, {"move_family": "hidden_pathway", "num_directions": int(moves.num_directions)}
 
     direction_step = float(cfg.quantum.extra.get("direction_step", 0.025))
@@ -337,6 +351,7 @@ def _build_move_table(cfg: ExperimentConfig, model, theta_ref: np.ndarray, activ
         data["x_train"],
         data["y_train"],
     )
+    setattr(move_table, "num_directions", int(moves.num_directions))
     return move_table, {"move_family": "direction_bank", "num_directions": int(moves.num_directions)}
 
 
@@ -499,6 +514,7 @@ def diagnose_quantum_experiment(cfg: ExperimentConfig) -> dict:
     for block_id, active in enumerate(blocks[:max_blocks]):
         if cfg.quantum.family == "coherent_metropolis_move":
             move_table, move_meta = _build_move_table(cfg, model, theta_ref, active, data)
+
             rep = _diagnose_move_block(
                 cfg,
                 move_table,
@@ -554,6 +570,8 @@ def run_quantum_experiment(cfg: ExperimentConfig) -> dict:
     codec = FixedPointCodec(bits=int(cfg.quantum.extra.get("discretization_bits", 1)), step=float(cfg.quantum.extra.get("quant_step", 0.05)))
     proposal_kind = str(cfg.quantum.extra.get("proposal_kind", "hamming"))
     blocks = _build_blocks(cfg, model)
+    print("num blocks =", len(blocks))
+    print("block sizes =", [len(b) for b in blocks])
     rng = np.random.default_rng(cfg.sampling.random_seed)
     backend = _get_backend_for_reports(cfg)
     saved_thetas = []
@@ -598,8 +616,7 @@ def run_quantum_experiment(cfg: ExperimentConfig) -> dict:
                 if not move_probs:
                     raise RuntimeError(f"No empirical move probabilities recovered for block {block_id}")
                 move_choice = _sample_move_from_probs(move_probs, rng)
-                if move_choice is not None and move_choice != "reject":
-                    theta = _apply_sampled_move(theta, active, move_table, move_choice)
+
 
                 info = {
                     "block_id": block_id,

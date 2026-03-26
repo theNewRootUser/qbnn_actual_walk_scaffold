@@ -1,0 +1,7 @@
+# Add these keys under quantum.extra in your coherent_metropolis_move config.
+
+
+# With full zero-sum patterns, increase exploratory shots.
+# 64 is usually too sparse once num_moves jumps above ~100.
+# Suggested:
+# exploratory_shots: 256
